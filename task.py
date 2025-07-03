@@ -1,115 +1,129 @@
-#task
+#task script
 
-import matplotlib.pyplot as plt
-from scipy.io import loadmat
-from rigid_transform import RigidTransform
-from maximum_intensity_projection import MaximumIntensityProjection
 import numpy as np
+from image3d import Image3D
+from filter3d import Filter3D
+from PIL import Image
+import time
 
-# Load data
-data = loadmat('/home/ccl521/MPHY0030/cw1.notfinal/task2.notfinal/test_lung_ct.mat')
-volume = data['vol'].astype('float16')
-voxel_dims = data['voxdims'][0] #giving [1 1 1]
+# Load image
+image = np.load("image_train00.npy")
+voxel_dim = (2.0, 0.5, 0.5)  # Example voxel dimensions
+img3d = Image3D(image, voxel_dim)
 
 
-# Experiment 1: Project image volume by Rigid Transformations 
-# Define transformations for various rotation and translation 
-transformations = {
-    "a1": ([0, 0, 0], [40, 0, 0]),  # a1: Translation in x only
-    "a2": ([0, 0, 0], [0, 50, 0]),  # a2: Translation in y only 
-    "a3": ([0, 0, 0], [0, 0, 40]),  # a3: Translation in z only
-    "b1": ([np.pi/6, 0, 0], [0, 0, 0]),  # b1: Rotation about x only
-    "b2": ([0, np.pi/6, 0], [0, 0, 0]),  # b2: Rotation about y only
-    "b3": ([0, 0, np.pi/6], [0, 0, 0]),  # b3: Rotation about z only
-
-    "c1": ([np.random.uniform(-np.pi / 6, np.pi / 6) for _ in range(3)],
-           [np.random.uniform(-40, 40), 
-            np.random.uniform(-100,100), 
-            np.random.uniform(-40, 40)] ),  #c1: Random sampling
-
-    "c2": ([np.random.uniform(-np.pi / 6, np.pi / 6) for _ in range(3)],
-           [np.random.uniform(-40, 40), 
-            np.random.uniform(-100,100), 
-            np.random.uniform(-40, 40)] ),  #c2: Random sampling
-
-    "c3": ([np.random.uniform(-np.pi / 6, np.pi / 6) for _ in range(3)],
-           [np.random.uniform(-40, 40), 
-            np.random.uniform(-100,100), 
-            np.random.uniform(-40, 40)] )  #c3: Random sampling
+# Experiment 1: Volume resizing
+print("\nExperiment 1: Volume resizing")
+# Calculate resizing ratio
+resize_ratios = {
+    "scenario1": (1.5, 1.5, 1.5), #upsampling
+    "scenario2": (0.5, 0.5, 0.5), #downsampling
+    "scenario3": (1.0, 4.0, 4.0), #resampling to isotropic voxel dimension
 }
 
+# Define filtering options
+filters = {
+    "a": None,  #no filter
+    "b": Filter3D("gaussian", sigma=1),  #gaussian
+    "c": Filter3D("bilateral", sigma_spatial=2, sigma_range=0.1)  #bilateral
+}
 
-# Loop through transformations
-for key, (rotations, translations) in transformations.items():
-    # Apply rigid transformation (rotation and translation)
-    rt = RigidTransform(rotations, translations, volume.shape, voxel_dims)
-    transformed_volume = rt.warp(volume)
+# Iterate over each resizing scenario
+for scenario, ratio in resize_ratios.items():
+    for filter_name, filter3d in filters.items():
+        start_time = time.time()
 
-    # Apply MIP to generate DRR
-    mip = MaximumIntensityProjection(1000, (200, 120), (0.8, 0.8))   
-    drr = mip.project(transformed_volume, voxel_dims, (0, 0, 0))  #image position is fixed at (0,0,0)
+        # Apply resizing with or without filtering
+        #for no filter, volume_resize is applied to image; for gaussian and bilateral filters, volume_resize_antialias is applied.
+        if filter3d:
+            resized_img = img3d.volume_resize_antialias(ratio, filter3d) 
+        else:
+            resized_img = img3d.volume_resize(ratio)
+        
 
-    # Save DRR as PNG
-    plt.imshow(drr, cmap='gray')
-    plt.axis('off')
-    plt.savefig(f'exp1_{key}.png')
+        elapsed = time.time() - start_time
+        print(f"{scenario} with {filter_name}: {elapsed:.2f}s")
 
-print("Experiment 1: DRRs saved as exp1_a1.png to exp1_c3.png.")
+         # Select 5 evenly spaced slices along the axial (z) direction
+        slice_indices = np.linspace(0, resized_img.image.shape[0] - 1, 5, dtype=int)
 
+        # Normalize the resized image to range [0, 255] for saving as PNG
+        scaled_image = ((resized_img.image - np.min(resized_img.image)) /
+                (np.max(resized_img.image) - np.min(resized_img.image)) * 255).astype(np.uint8)
 
-# Experiment 2: Project image volume by re-positioning image volume
-# Define transformations on rotations and detector repositioning
-transformations = {
-    "a1": ([0, 0, 0], [50, 0, 0]),  # a1: Reposition in x only
-    "a2": ([0, 0, 0], [0, 40, 0]),  # a2: Reposition in y only
-    "a3": ([0, 0, 0], [0, 0, 500]),  # a3: Reposition in z only
-    "b1": ([np.pi / 6, 0, 0], [0, 0, 0]),  # b1: Rotation about x only
-    "b2": ([0, np.pi / 6, 0], [0, 0, 0]),  # b2: Rotation about y only
-    "b3": ([0, 0, np.pi / 6], [0, 0, 0]),  # b3: Rotation about z only
-
-    "c1": ([np.random.uniform(-np.pi / 6, np.pi / 6) for _ in range(3)],
-           [np.random.uniform(-40, 40), 
-            np.random.uniform(-40, 40), 
-            np.random.uniform(-400, 400)] ),  #c1: Random sampling
-
-    "c2": ([np.random.uniform(-np.pi / 6, np.pi / 6) for _ in range(3)],
-           [np.random.uniform(-40, 40), 
-            np.random.uniform(-40, 40), 
-            np.random.uniform(-400, 400)] ),  #c1: Random sampling
-
-    "c3": ([np.random.uniform(-np.pi / 6, np.pi / 6) for _ in range(3)],
-           [np.random.uniform(-40, 40), 
-            np.random.uniform(-40, 40), 
-            np.random.uniform(-400, 400)] )  #c1: Random sampling
- }
+        # Save axial slices
+        for z in slice_indices:
+            slice_img = Image.fromarray(scaled_image[z, :, :].astype("uint8"))  # Axial slice
+            slice_img.save(f"exp1_{scenario}_z{z}_{filter_name}.png")
 
 
 
-# Loop through transformations
-for key, (rotations, image_position) in transformations.items():
-    # Apply rigid transformation (only rotations are applied, no translation)
-    rt = RigidTransform(rotations, (0, 0, 0), volume.shape, voxel_dims)  #translation is fixed at (0, 0, 0)
-    transformed_volume = rt.warp(volume)
-
-    # Apply MIP projection with the specified `image_position` to generate DRR
-    mip = MaximumIntensityProjection(1000, (200, 120), (0.8, 0.8))
-    drr = mip.project(transformed_volume, voxel_dims, image_position)
-
-    # Save DRR as PNG
-    plt.imshow(drr, cmap='gray')
-    plt.axis('off')
-    plt.savefig(f"exp2_{key}.png")
-
-print("Experiment 2: DRRs saved as exp1_a1.png to exp1_c3.png.")
+#Resizing without filter takes the shortest time, followed by with Gaussian filter and Bilateral filter.
+#Downsampling takes the shortest time, followed by up sampling and resampling to isotropic voxel.
+#Resizing without filter is computationally efficient but many cause aliasing; Gaussian filtering reduces 
+#aliasing effect through smoothing; Bilateral filter is computationally expensive but is able to provide 
+#smoothing while preserving edge.
 
 
-#Comparing two sets of DDRs
-#For Exp1, when the volume traslates along y-axis (a2), different levels 
-#of anatomy along that axis are revealed. As translation in y-axis increases, the anatomy 
-#appears to reveal deeper structures. However, the size of the anatomy remains the same because 
-#the projection setup does not change. For Exp2, when the volume is repositioned neareror farther 
-#from the detector (a3), its apparent size changes. As it moves closer to the detector, the size 
-#appears bigger due to changing scale. This explains why DRRs in Exp1 appear the same size, while 
-#in Exp2, the anatomy’s size varies. 
+
+# Experiment 2: Investigate aliasing effects
+print("\nExperiment 2: Investigating aliasing effects")
+
+#Load image
+image = np.load("image_train00.npy")
+voxel_dim = (2.0, 0.5, 0.5)  # Example voxel dimensions
+img3d = Image3D(image, voxel_dim)
+
+# Define filters
+filters = {
+    "a": None,  # No filter
+    "b": Filter3D("gaussian", sigma=1),  # Gaussian filter
+    "c": Filter3D("bilateral", sigma_spatial=5, sigma_range=100)  # Bilateral filter
+}
+
+# Up-sample the original image (Scenario 1 from Experiment 1)
+upsample_ratio = (1.5, 1.5, 1.5)
+upsampled_image = img3d.volume_resize_antialias(upsample_ratio, Filter3D("bilateral", sigma_spatial=2, sigma_range=0.1))  ## Bilateral filter during upsampling
+
+# Down-sample back to the original size
+original_size_ratio = tuple(1 / r for r in upsample_ratio)
+
+# Then apply each filter
+for filter_name, filter3d in filters.items():  
+        start_time = time.time()
+
+        # Down-sample using the strategy
+        if filter3d:
+            downsampled_image = upsampled_image.volume_resize_antialias(original_size_ratio, filter3d)
+        else:
+            downsampled_image = upsampled_image.volume_resize(original_size_ratio)
+
+        elapsed = time.time() - start_time
+        print(f"Down-sampling with {filter_name}: {elapsed:.2f}s")
+
+     
+        # Compute intensity differences
+        intensity_diff = -(img3d.image - downsampled_image.image)
+        mean_diff = np.mean(intensity_diff)
+        std_diff = np.std(intensity_diff)
+        print(f"Filter: {filter_name} - Mean intensity difference: {mean_diff:.2f}, Std deviation: {std_diff:.2f}")
 
 
+        # Ensure normalization of the image to 0-255 range
+        #slice_array = downsampled_image[z, :, :]
+        slice_indices = np.linspace(0, downsampled_image.image.shape[0] - 1, 5, dtype=int)
+        scaled_image = ((downsampled_image.image - np.min(downsampled_image.image)) /
+                (np.max(downsampled_image.image) - np.min(downsampled_image.image)) * 255).astype(np.uint8)
+        
+        for z in slice_indices: 
+            # Save the rotated slice as an image with the correct ordering
+            slice_img = Image.fromarray(scaled_image[z, :, :].astype("uint8"))
+            slice_img.save(f"exp2_scenario2_z{z}_{filter_name}.png")
+
+
+#No filter shows highest mean intensity difference which is expected as aliasing is introduced.
+#Bilateral filtering gives slightly lower mean inensity difference and 
+# std deviation compared to no filtering. Gaussian filtering gives lowest mean intensity 
+# difference and std deviation. This is unusual as Bilateral is supposed to have the lowest 
+#mean intensity difference as it minimizes aliasing while preserving edge. It is assumed
+#that the resizing ratios and filter parameters are not finely tuned yet.
